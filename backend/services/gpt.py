@@ -1,0 +1,163 @@
+"""
+services/gpt.py
+───────────────
+Azure OpenAI GPT-4o integration for:
+  • Emergency analysis (severity scoring + recommendation)
+  • RAG-grounded Q&A over retrieved incidents
+  • Voice transcript analysis
+"""
+from __future__ import annotations
+
+import os
+from openai import AzureOpenAI
+
+_client: AzureOpenAI | None = None
+
+
+def _get_client() -> AzureOpenAI:
+    global _client
+    if _client is None:
+        _client = AzureOpenAI(
+            azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+            api_key=os.environ["AZURE_OPENAI_KEY"],
+            api_version="2024-02-01",
+        )
+    return _client
+
+
+DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+
+
+# ---------------------------------------------------------------------------
+# Emergency analysis
+# ---------------------------------------------------------------------------
+
+ANALYSIS_SYSTEM = """
+You are an emergency triage AI for the CivicAI platform, deployed across Kenya.
+Given multimodal inputs (detected objects, scene description, voice transcript,
+location, past incident context), you MUST return a JSON object with EXACTLY
+these fields:
+{
+  "severity": <integer 1-10>,
+  "incident_type": <string>,
+  "risk_level": <"Info"|"Minor"|"Moderate"|"Serious"|"Critical">,
+  "recommendation": <string — one concise actionable sentence>,
+  "confidence": <float 0-1>
+}
+Do not include markdown fences or any text outside the JSON.
+""".strip()
+
+
+def analyse_emergency(
+    detected_objects: list[str],
+    clip_scene: str,
+    sam_summary: str,
+    voice_transcript: str,
+    location: str,
+    past_incidents: list[str],
+) -> dict:
+    """
+    Call GPT-4o to produce a structured emergency analysis.
+    Returns parsed JSON dict.
+    """
+    user_prompt = f"""
+Analyse this emergency report:
+
+LOCATION: {location}
+
+VISION — detected objects: {', '.join(detected_objects) or 'none'}
+VISION — scene (CLIP): {clip_scene}
+VISION — SAM summary: {sam_summary}
+
+VOICE TRANSCRIPT: {voice_transcript or '(none provided)'}
+
+PAST INCIDENTS IN AREA (last 24h): {'; '.join(past_incidents) or 'none'}
+
+Return only the JSON object.
+""".strip()
+
+    response = _get_client().chat.completions.create(
+        model=DEPLOYMENT,
+        messages=[
+            {"role": "system", "content": ANALYSIS_SYSTEM},
+            {"role": "user",   "content": user_prompt},
+        ],
+        temperature=0.2,
+        max_tokens=300,
+        response_format={"type": "json_object"},
+    )
+
+    import json
+    return json.loads(response.choices[0].message.content)
+
+
+# ---------------------------------------------------------------------------
+# RAG — grounded Q&A
+# ---------------------------------------------------------------------------
+
+RAG_SYSTEM = """
+You are CivicAI, an emergency intelligence assistant for Kenyan civil authorities.
+You will be given a set of retrieved incident records and a user question.
+Answer ONLY using the provided records — do not hallucinate facts.
+Be concise, factual, and prioritise life-safety information.
+""".strip()
+
+
+def rag_answer(question: str, retrieved_incidents: list[dict]) -> str:
+    """
+    Generate a grounded natural-language answer using retrieved incident docs.
+    retrieved_incidents: list of Cosmos DB incident documents (dicts).
+    """
+    context = "\n\n".join(
+        f"[{inc.get('id')}] {inc.get('type')} — {inc.get('area')}, {inc.get('city')}. "
+        f"Severity {inc.get('severity')}/10. Status: {inc.get('status')}. "
+        f"Responders: {', '.join(inc.get('responders', []))}."
+        for inc in retrieved_incidents
+    )
+
+    messages = [
+        {"role": "system",  "content": RAG_SYSTEM},
+        {"role": "user",    "content": f"INCIDENTS:\n{context}\n\nQUESTION: {question}"},
+    ]
+
+    response = _get_client().chat.completions.create(
+        model=DEPLOYMENT,
+        messages=messages,
+        temperature=0.3,
+        max_tokens=500,
+    )
+    return response.choices[0].message.content.strip()
+
+
+# ---------------------------------------------------------------------------
+# Voice transcript stress estimation
+# ---------------------------------------------------------------------------
+
+STRESS_SYSTEM = """
+You are a vocal stress analysis model. Given only a text transcript (speech-to-text),
+estimate the urgency/stress level from linguistic cues (word choice, sentence fragmentation,
+repetition, exclamation). Return ONLY a JSON with:
+{"urgency": <0-10>, "cues": [<string>, ...]}
+""".strip()
+
+
+def estimate_voice_urgency(transcript: str) -> dict:
+    """
+    Estimate urgency from voice transcript text.
+    Note: this is a supplementary signal, not definitive evidence.
+    """
+    if not transcript:
+        return {"urgency": 0, "cues": []}
+
+    import json
+    response = _get_client().chat.completions.create(
+        model=DEPLOYMENT,
+        messages=[
+            {"role": "system", "content": STRESS_SYSTEM},
+            {"role": "user",   "content": transcript},
+        ],
+        temperature=0.1,
+        max_tokens=150,
+        response_format={"type": "json_object"},
+    )
+    return json.loads(response.choices[0].message.content)

@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-critical: #E24B4A;
+    --color-serious:  #EF9F27;
+    --color-moderate: #DDB929;
+    --color-minor:    #378ADD;
+    --color-info:     #888780;
+  }
+
+  body {
+    @apply bg-gray-950 text-gray-100 antialiased;
+  }
+
+  * {
+    @apply box-border;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-gray-900 border border-gray-800 rounded-xl p-4;
+  }
+
+  .btn {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-700
+           text-sm font-medium transition-colors cursor-pointer;
+  }
+
+  .btn-primary {
+    @apply bg-blue-600 border-blue-600 text-white hover:bg-blue-500;
+  }
+
+  .btn-danger {
+    @apply bg-red-900/40 border-red-700 text-red-400 hover:bg-red-900/60;
+  }
+
+  .btn-ghost {
+    @apply bg-transparent border-gray-700 text-gray-300 hover:bg-gray-800;
+  }
+
+  .form-input {
+    @apply w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm
+           text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500;
+  }
+
+  .form-select {
+    @apply w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm
+           text-gray-100 focus:outline-none focus:border-blue-500;
+  }
+
+  .form-textarea {
+    @apply w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm
+           text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500 resize-y min-h-[80px];
+  }
+
+  .sev-badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold;
+  }
+}
+
+/* Pulse animation for live markers */
+@keyframes ping-slow {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50%       { transform: scale(1.4); opacity: 0.3; }
+}
+.pulse-ring { animation: ping-slow 2s ease-in-out infinite; }
+
+/* Mapbox popup override */
+.mapboxgl-popup-content {
+  background: #111827 !important;
+  border: 1px solid #374151 !important;
+  border-radius: 10px !important;
+  color: #f9fafb !important;
+  padding: 12px 14px !important;
+  font-size: 13px !important;
+}
+.mapboxgl-popup-tip { display: none !important; }
