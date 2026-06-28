@@ -45,7 +45,7 @@ Open http://localhost:5173
 ## Project structure
 
 ```
-civicai/
+xishai/
 ├── backend/
 │   ├── main.py                   # FastAPI app entry point
 │   ├── requirements.txt

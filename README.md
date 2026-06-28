@@ -1,4 +1,4 @@
-# CivicAI — Emergency & Civic Intelligence Platform
+# XishAI — Emergency & Civic Intelligence Platform
 
 A full-stack AI-powered emergency response platform combining real-time incident reporting,
 computer vision, GPT-4o reasoning, Hedera blockchain logging, and predictive risk analytics.
