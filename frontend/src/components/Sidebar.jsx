@@ -5,6 +5,7 @@ const NAV = [
   { to: '/dashboard',   label: 'Dashboard',      icon: '⊞' },
   { to: '/map',         label: 'Live map',        icon: '🗺' },
   { label: 'Response', isSection: true },
+  { to: '/responder',   label: 'Emergency help',  icon: '🚨', highlight: true },
   { to: '/report',      label: 'Report incident', icon: '⚠' },
   { to: '/ai',          label: 'AI assistant',    icon: '🤖' },
   { label: 'Analysis', isSection: true },
@@ -33,6 +34,21 @@ export default function Sidebar() {
             <div key={i} className="px-4 pt-4 pb-1 text-[10px] font-semibold text-gray-600 uppercase tracking-widest">
               {item.label}
             </div>
+          ) : item.highlight ? (
+            /* Emergency help — special red highlight */
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                `flex items-center gap-2.5 px-4 py-2.5 text-sm transition-colors mx-2 my-0.5 rounded-lg font-semibold ` +
+                (isActive
+                  ? 'bg-red-700 text-white'
+                  : 'bg-red-900/30 text-red-400 border border-red-900 hover:bg-red-800/40 hover:text-red-300')
+              }
+            >
+              <span className="text-base">{item.icon}</span>
+              {item.label}
+            </NavLink>
           ) : (
             <NavLink
               key={item.to}

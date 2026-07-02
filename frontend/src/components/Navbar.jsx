@@ -7,6 +7,7 @@ const TITLES = {
   '/ai':          'AI assistant',
   '/predictions': 'Predictions',
   '/blockchain':  'Blockchain log',
+  '/responder':   '🚨 Emergency responder',
 }
 
 export default function Navbar() {
@@ -23,6 +24,12 @@ export default function Navbar() {
       <span className="sev-badge bg-amber-900/40 text-amber-400 border border-amber-800">
         7 active
       </span>
+
+      <Link to="/responder">
+        <button className="btn btn-danger text-xs py-1 px-3">
+          🚨 Help
+        </button>
+      </Link>
 
       <Link to="/report">
         <button className="btn btn-danger text-xs py-1 px-3">
