@@ -9,9 +9,6 @@ from __future__ import annotations
 import os
 from typing import List
 
-from azure.communication.email import EmailClient
-from azure.communication.sms import SmsClient
-
 SENDER_EMAIL = os.getenv("ACS_SENDER_EMAIL", "alerts@civicai.azurecomm.net")
 SENDER_PHONE = os.getenv("ACS_SENDER_PHONE", "+10000000000")
 
@@ -20,11 +17,13 @@ AUTHORITY_EMAILS = os.getenv("AUTHORITY_EMAILS", "responders@example.com").split
 AUTHORITY_PHONES = os.getenv("AUTHORITY_PHONES", "+254700000000").split(",")
 
 
-def _email_client() -> EmailClient:
+def _email_client():
+    from azure.communication.email import EmailClient
     return EmailClient.from_connection_string(os.environ["ACS_CONNECTION_STRING"])
 
 
-def _sms_client() -> SmsClient:
+def _sms_client():
+    from azure.communication.sms import SmsClient
     return SmsClient.from_connection_string(os.environ["ACS_CONNECTION_STRING"])
 
 
@@ -35,6 +34,8 @@ def send_alert(incident: dict) -> List[str]:
     """
     severity = incident.get("severity", 0)
     if severity < 7:
+        return []
+    if not os.getenv("ACS_CONNECTION_STRING"):
         return []
 
     subject = f"[CivicAI ALERT] {incident.get('type')} — Severity {severity}/10 in {incident.get('city')}"

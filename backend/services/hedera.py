@@ -15,16 +15,11 @@ import hashlib
 import json
 import os
 
-from hedera import (
-    Client,
-    AccountId,
-    PrivateKey,
-    TopicId,
-    TopicMessageSubmitTransaction,
-)
-
-
-def _get_client() -> Client:
+def _get_client():
+    try:
+        from hedera import Client, AccountId, PrivateKey
+    except ImportError as exc:
+        raise RuntimeError("Hedera SDK is not installed") from exc
     account_id  = AccountId.fromString(os.environ["HEDERA_ACCOUNT_ID"])
     private_key = PrivateKey.fromString(os.environ["HEDERA_PRIVATE_KEY"])
     network     = os.getenv("HEDERA_NETWORK", "mainnet")
@@ -58,6 +53,10 @@ def log_to_hedera(incident_doc: dict) -> dict:
           "consensus_timestamp": str,
         }
     """
+    try:
+        from hedera import TopicId, TopicMessageSubmitTransaction
+    except ImportError as exc:
+        raise RuntimeError("Hedera SDK is not installed") from exc
     topic_id  = TopicId.fromString(os.environ["HEDERA_TOPIC_ID"])
     inc_hash  = hash_incident(incident_doc)
     client    = _get_client()

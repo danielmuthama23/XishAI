@@ -13,27 +13,13 @@ import os
 from pathlib import Path
 from typing import List, Tuple
 
-import numpy as np
-from PIL import Image
-
-# ── YOLOv11 (via Ultralytics) ──────────────────────────────────────────────
-from ultralytics import YOLO
-
-# ── CLIP ───────────────────────────────────────────────────────────────────
-import clip
-import torch
-
-# ── SAM ────────────────────────────────────────────────────────────────────
-from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
-
-
 # ---------------------------------------------------------------------------
 # Model paths — download once and cache
 # ---------------------------------------------------------------------------
 YOLO_MODEL_PATH = os.getenv("YOLO_MODEL_PATH", "models/yolov11n.pt")
 SAM_CHECKPOINT   = os.getenv("SAM_CHECKPOINT",  "models/sam_vit_h_4b8939.pth")
 SAM_MODEL_TYPE   = os.getenv("SAM_MODEL_TYPE",  "vit_h")
-DEVICE           = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = "cpu"
 
 # Emergency scene labels used for CLIP zero-shot classification
 EMERGENCY_LABELS = [
@@ -57,9 +43,10 @@ _clip_preprocess = None
 _sam_generator = None
 
 
-def _get_yolo() -> YOLO:
+def _get_yolo():
     global _yolo_model
     if _yolo_model is None:
+        from ultralytics import YOLO
         _yolo_model = YOLO(YOLO_MODEL_PATH)
     return _yolo_model
 
@@ -67,13 +54,18 @@ def _get_yolo() -> YOLO:
 def _get_clip():
     global _clip_model, _clip_preprocess
     if _clip_model is None:
+        import clip
+        import torch
+        global DEVICE
+        DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
         _clip_model, _clip_preprocess = clip.load("ViT-B/32", device=DEVICE)
     return _clip_model, _clip_preprocess
 
 
-def _get_sam() -> SamAutomaticMaskGenerator:
+def _get_sam():
     global _sam_generator
     if _sam_generator is None:
+        from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
         sam = sam_model_registry[SAM_MODEL_TYPE](checkpoint=SAM_CHECKPOINT)
         sam.to(device=DEVICE)
         _sam_generator = SamAutomaticMaskGenerator(sam)
@@ -94,6 +86,8 @@ def run_vision_pipeline(image_bytes: bytes) -> dict:
         sam_segment_count : int
         sam_largest_area  : float  (fraction of image)
     """
+    import numpy as np
+    from PIL import Image
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     image_np = np.array(image)
 
@@ -114,7 +108,7 @@ def run_vision_pipeline(image_bytes: bytes) -> dict:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _run_yolo(image_np: np.ndarray) -> List[str]:
+def _run_yolo(image_np) -> List[str]:
     """Run YOLOv11 and return a deduplicated list of detected class names."""
     model   = _get_yolo()
     results = model(image_np, verbose=False)
@@ -126,11 +120,13 @@ def _run_yolo(image_np: np.ndarray) -> List[str]:
     return sorted(classes)
 
 
-def _run_clip(image: Image.Image) -> Tuple[str, float]:
+def _run_clip(image) -> Tuple[str, float]:
     """
     Zero-shot classify the scene against EMERGENCY_LABELS.
     Returns (best_label, confidence_probability).
     """
+    import clip
+    import torch
     model, preprocess = _get_clip()
 
     image_tensor = preprocess(image).unsqueeze(0).to(DEVICE)
@@ -146,7 +142,7 @@ def _run_clip(image: Image.Image) -> Tuple[str, float]:
     return EMERGENCY_LABELS[best_idx], float(probs[best_idx])
 
 
-def _run_sam(image_np: np.ndarray) -> Tuple[int, float]:
+def _run_sam(image_np) -> Tuple[int, float]:
     """
     Run SAM automatic mask generation.
     Returns (number_of_masks, area_of_largest_mask_as_fraction_of_image).

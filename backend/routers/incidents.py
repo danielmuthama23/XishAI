@@ -33,7 +33,7 @@ async def report_incident(
     location_text:              str          = Form(...),
     gps_lat:                    Optional[float] = Form(None),
     gps_lon:                    Optional[float] = Form(None),
-    reporter_estimated_severity: int         = Form(5),
+    reporter_estimated_severity: int         = Form(5, ge=1, le=10),
     voice_transcript:           str          = Form(""),
     photo:                      Optional[UploadFile] = File(None),
     voice_file:                 Optional[UploadFile] = File(None),
@@ -57,6 +57,7 @@ async def report_incident(
     # ── 1. Upload media ────────────────────────────────────────────────────
     photo_url = voice_url = video_url = None
 
+    photo_bytes: bytes | None = None
     if photo:
         photo_bytes = await photo.read()
         photo_url   = blob.upload_media(photo_bytes, photo.filename, photo.content_type, incident_id)
@@ -71,8 +72,13 @@ async def report_incident(
 
     # ── 2. Vision pipeline ─────────────────────────────────────────────────
     vision_result = {}
-    if photo_url and photo:
-        vision_result = vision.run_vision_pipeline(photo_bytes)
+    if photo_url and photo_bytes is not None:
+        # A media-analysis failure must not discard an already submitted
+        # emergency report. The original photo remains available to responders.
+        try:
+            vision_result = vision.run_vision_pipeline(photo_bytes)
+        except Exception as exc:
+            print(f"[vision] analysis failed: {exc}")
 
     detected_objects = vision_result.get("detected_objects", [])
     clip_scene       = vision_result.get("clip_scene", "")
@@ -93,7 +99,11 @@ async def report_incident(
         past_incidents    = past,
     )
 
-    severity   = int(ai_raw.get("severity", reporter_estimated_severity))
+    try:
+        severity = int(ai_raw.get("severity", reporter_estimated_severity))
+    except (TypeError, ValueError):
+        severity = reporter_estimated_severity
+    severity = max(1, min(10, severity))
     risk_level = severity_risk_level(severity)
 
     ai_analysis = {
@@ -107,7 +117,8 @@ async def report_incident(
     }
 
     # ── 4. Cosmos DB ───────────────────────────────────────────────────────
-    gps = {"lat": gps_lat, "lon": gps_lon} if gps_lat and gps_lon else None
+    # Zero is a valid coordinate, so test explicitly for missing values.
+    gps = {"lat": gps_lat, "lon": gps_lon} if gps_lat is not None and gps_lon is not None else None
 
     incident_doc = {
         "id":           incident_id,
@@ -116,6 +127,7 @@ async def report_incident(
         "risk_level":   risk_level,
         "city":         city,
         "area":         area,
+        "description":  description,
         "gps":          gps,
         "photo_url":    photo_url,
         "voice_url":    voice_url,

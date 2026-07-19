@@ -1,0 +1,12 @@
+{
+    "name": "@types/mapbox-gl",
+    "version": "3.5.0",
+    "description": "Stub TypeScript definitions entry for mapbox-gl, which provides its own types definitions",
+    "main": "",
+    "scripts": {},
+    "license": "MIT",
+    "dependencies": {
+        "mapbox-gl": "*"
+    },
+    "deprecated": "This is a stub types definition. mapbox-gl provides its own type definitions, so you do not need this installed."
+}

@@ -77,13 +77,14 @@ async def analyse_voice(audio: UploadFile = File(...)):
     )
 
 
-async def _azure_speech_to_text(audio_bytes: bytes, content_type: str) -> str:
+async def _azure_speech_to_text(audio_bytes: bytes, content_type: str | None) -> str:
     """
     Transcribe audio using Azure Cognitive Services Speech SDK.
     Requires AZURE_SPEECH_KEY and AZURE_SPEECH_REGION env vars.
     """
-    import os, azure.cognitiveservices.speech as speechsdk
-    import tempfile, pathlib
+    import os
+    import tempfile
+    from pathlib import Path
 
     key    = os.environ.get("AZURE_SPEECH_KEY", "")
     region = os.environ.get("AZURE_SPEECH_REGION", "eastus")
@@ -91,18 +92,24 @@ async def _azure_speech_to_text(audio_bytes: bytes, content_type: str) -> str:
     if not key:
         return "(speech service not configured)"
 
+    try:
+        import azure.cognitiveservices.speech as speechsdk
+    except ImportError:
+        return "(speech service SDK is not installed)"
+
     # Write bytes to a temp file for the SDK
-    ext = "wav" if "wav" in content_type else "mp3"
+    ext = "wav" if "wav" in (content_type or "") else "mp3"
     with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as f:
         f.write(audio_bytes)
         tmp_path = f.name
 
-    config  = speechsdk.SpeechConfig(subscription=key, region=region)
-    audio_c = speechsdk.AudioConfig(filename=tmp_path)
-    recognizer = speechsdk.SpeechRecognizer(speech_config=config, audio_config=audio_c)
-
-    result = recognizer.recognize_once()
-    pathlib.Path(tmp_path).unlink(missing_ok=True)
+    try:
+        config  = speechsdk.SpeechConfig(subscription=key, region=region)
+        audio_c = speechsdk.AudioConfig(filename=tmp_path)
+        recognizer = speechsdk.SpeechRecognizer(speech_config=config, audio_config=audio_c)
+        result = recognizer.recognize_once()
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
 
     if result.reason == speechsdk.ResultReason.RecognizedSpeech:
         return result.text

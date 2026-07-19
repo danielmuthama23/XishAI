@@ -1,106 +1,119 @@
-"""
-services/cosmos.py
-──────────────────
-Azure Cosmos DB CRUD for incidents, cities, resources.
-"""
+"""Incident persistence with Cosmos DB and a development-safe local fallback."""
 from __future__ import annotations
 
 import os
-from typing import Any, List, Optional
-from azure.cosmos import CosmosClient, PartitionKey, exceptions
+from copy import deepcopy
+from typing import List, Optional
 
-_client: CosmosClient | None = None
+try:
+    from azure.cosmos import CosmosClient, exceptions
+except ImportError:  # Keep the API usable when optional Azure packages are absent.
+    CosmosClient = None
+    exceptions = None
 
-DATABASE  = os.getenv("COSMOS_DATABASE", "civicai")
-C_INC     = os.getenv("COSMOS_CONTAINER_INCIDENTS",  "incidents")
-C_CITIES  = os.getenv("COSMOS_CONTAINER_CITIES",     "cities")
-C_RES     = os.getenv("COSMOS_CONTAINER_RESOURCES",  "resources")
+_client = None
+_incidents: dict[str, dict] = {}
+_resources: list[dict] = []
+_cities: dict[str, dict] = {}
+
+DATABASE = os.getenv("COSMOS_DATABASE", "civicai")
+C_INC = os.getenv("COSMOS_CONTAINER_INCIDENTS", "incidents")
+C_CITIES = os.getenv("COSMOS_CONTAINER_CITIES", "cities")
+C_RES = os.getenv("COSMOS_CONTAINER_RESOURCES", "resources")
+
+
+def _configured() -> bool:
+    endpoint, key = os.getenv("COSMOS_ENDPOINT", ""), os.getenv("COSMOS_KEY", "")
+    return bool(CosmosClient and endpoint and key and "YOUR_" not in endpoint and "your_" not in key)
 
 
 def _db():
     global _client
+    if not _configured():
+        return None
     if _client is None:
-        _client = CosmosClient(
-            os.environ["COSMOS_ENDPOINT"],
-            credential=os.environ["COSMOS_KEY"],
-        )
+        _client = CosmosClient(os.environ["COSMOS_ENDPOINT"], credential=os.environ["COSMOS_KEY"])
     return _client.get_database_client(DATABASE)
 
 
-# ---------------------------------------------------------------------------
-# Incidents
-# ---------------------------------------------------------------------------
-
 def create_incident(doc: dict) -> dict:
-    """Insert a new incident document. Returns the created doc."""
-    container = _db().get_container_client(C_INC)
-    return container.create_item(body=doc)
+    database = _db()
+    if database is None:
+        _incidents[doc["id"]] = deepcopy(doc)
+        return deepcopy(doc)
+    return database.get_container_client(C_INC).create_item(body=doc)
 
 
 def get_incident(incident_id: str) -> Optional[dict]:
+    database = _db()
+    if database is None:
+        doc = _incidents.get(incident_id)
+        return deepcopy(doc) if doc else None
     try:
-        container = _db().get_container_client(C_INC)
-        return container.read_item(item=incident_id, partition_key=incident_id)
+        return database.get_container_client(C_INC).read_item(item=incident_id, partition_key=incident_id)
     except exceptions.CosmosResourceNotFoundError:
         return None
 
 
-def list_incidents(
-    city: Optional[str] = None,
-    severity_min: int = 1,
-    status: Optional[str] = None,
-    limit: int = 50,
-) -> List[dict]:
-    """Query incidents with optional filters."""
-    container = _db().get_container_client(C_INC)
-    clauses = [f"c.severity >= {severity_min}"]
+def list_incidents(city: Optional[str] = None, severity_min: int = 1,
+                   status: Optional[str] = None, limit: int = 50) -> List[dict]:
+    severity_min = max(1, min(10, severity_min))
+    limit = max(1, min(100, limit))
+    database = _db()
+    if database is None:
+        items = (doc for doc in _incidents.values()
+                 if doc.get("severity", 0) >= severity_min
+                 and (city is None or doc.get("city") == city)
+                 and (status is None or doc.get("status") == status))
+        return [deepcopy(doc) for doc in sorted(items, key=lambda d: d.get("timestamp", ""), reverse=True)[:limit]]
+
+    clauses, parameters = ["c.severity >= @severity_min"], [{"name": "@severity_min", "value": severity_min}]
     if city:
-        clauses.append(f"c.city = '{city}'")
+        clauses.append("c.city = @city")
+        parameters.append({"name": "@city", "value": city})
     if status:
-        clauses.append(f"c.status = '{status}'")
-    where = " AND ".join(clauses)
-    query  = f"SELECT * FROM c WHERE {where} ORDER BY c._ts DESC OFFSET 0 LIMIT {limit}"
-    return list(container.query_items(query=query, enable_cross_partition_query=True))
+        clauses.append("c.status = @status")
+        parameters.append({"name": "@status", "value": status})
+    query = f"SELECT * FROM c WHERE {' AND '.join(clauses)} ORDER BY c._ts DESC OFFSET 0 LIMIT {limit}"
+    return list(database.get_container_client(C_INC).query_items(
+        query=query, parameters=parameters, enable_cross_partition_query=True))
 
 
 def update_incident(incident_id: str, updates: dict) -> dict:
-    """Merge updates into an existing incident document."""
     doc = get_incident(incident_id)
     if not doc:
         raise ValueError(f"Incident {incident_id} not found")
     doc.update(updates)
-    container = _db().get_container_client(C_INC)
-    return container.replace_item(item=incident_id, body=doc)
+    database = _db()
+    if database is None:
+        _incidents[incident_id] = deepcopy(doc)
+        return deepcopy(doc)
+    return database.get_container_client(C_INC).replace_item(item=incident_id, body=doc)
 
 
 def add_crowd_confirmation(incident_id: str, user_id: str) -> dict:
-    """Append a user confirmation to the crowd_confirmations array."""
     doc = get_incident(incident_id)
     if not doc:
         raise ValueError(f"Incident {incident_id} not found")
-    confirmed = doc.get("confirmed_by", [])
+    confirmed = doc.setdefault("confirmed_by", [])
     if user_id not in confirmed:
         confirmed.append(user_id)
-    doc["confirmed_by"] = confirmed
     doc["verified"] = len(confirmed) >= 3
-    container = _db().get_container_client(C_INC)
-    return container.replace_item(item=incident_id, body=doc)
+    return update_incident(incident_id, {"confirmed_by": confirmed, "verified": doc["verified"]})
 
-
-# ---------------------------------------------------------------------------
-# Resources (fire stations, hospitals, police)
-# ---------------------------------------------------------------------------
 
 def get_resources_by_type(resource_type: str) -> List[dict]:
-    container = _db().get_container_client(C_RES)
-    query = f"SELECT * FROM c WHERE c.type = '{resource_type}'"
-    return list(container.query_items(query=query, enable_cross_partition_query=True))
+    database = _db()
+    if database is None:
+        return [deepcopy(resource) for resource in _resources if resource.get("type") == resource_type]
+    query = "SELECT * FROM c WHERE c.type = @type"
+    return list(database.get_container_client(C_RES).query_items(
+        query=query, parameters=[{"name": "@type", "value": resource_type}], enable_cross_partition_query=True))
 
-
-# ---------------------------------------------------------------------------
-# City index
-# ---------------------------------------------------------------------------
 
 def upsert_city_stats(city_doc: dict) -> dict:
-    container = _db().get_container_client(C_CITIES)
-    return container.upsert_item(body=city_doc)
+    database = _db()
+    if database is None:
+        _cities[city_doc["id"]] = deepcopy(city_doc)
+        return deepcopy(city_doc)
+    return database.get_container_client(C_CITIES).upsert_item(body=city_doc)

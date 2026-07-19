@@ -9,13 +9,18 @@ Azure OpenAI GPT-4o integration for:
 from __future__ import annotations
 
 import os
-from openai import AzureOpenAI
+try:
+    from openai import AzureOpenAI
+except ImportError:
+    AzureOpenAI = None
 
 _client: AzureOpenAI | None = None
 
 
 def _get_client() -> AzureOpenAI:
     global _client
+    if AzureOpenAI is None:
+        raise RuntimeError("OpenAI SDK is not installed")
     if _client is None:
         _client = AzureOpenAI(
             azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
@@ -26,6 +31,12 @@ def _get_client() -> AzureOpenAI:
 
 
 DEPLOYMENT = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
+
+
+def _configured() -> bool:
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "")
+    key = os.getenv("AZURE_OPENAI_KEY", "")
+    return bool(AzureOpenAI and endpoint and key and "YOUR_" not in endpoint and "your_" not in key)
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +71,17 @@ def analyse_emergency(
     Call GPT-4o to produce a structured emergency analysis.
     Returns parsed JSON dict.
     """
+    if not _configured():
+        severity = 7 if any(word in (voice_transcript + " " + clip_scene).lower()
+                                     for word in ("fire", "collapse", "trapped", "bleeding", "explosion")) else 5
+        return {
+            "severity": severity,
+            "incident_type": clip_scene or "Reported incident",
+            "risk_level": "Serious" if severity >= 7 else "Moderate",
+            "recommendation": "Dispatch an appropriate responder and verify the situation immediately.",
+            "confidence": 0.35,
+        }
+
     user_prompt = f"""
 Analyse this emergency report:
 
@@ -108,6 +130,13 @@ def rag_answer(question: str, retrieved_incidents: list[dict]) -> str:
     Generate a grounded natural-language answer using retrieved incident docs.
     retrieved_incidents: list of Cosmos DB incident documents (dicts).
     """
+    if not _configured():
+        summary = "; ".join(
+            f"{inc.get('id')}: {inc.get('type')} in {inc.get('area')}, {inc.get('city')} (severity {inc.get('severity')}/10, {inc.get('status')})"
+            for inc in retrieved_incidents
+        )
+        return f"Matching incidents: {summary}."
+
     context = "\n\n".join(
         f"[{inc.get('id')}] {inc.get('type')} — {inc.get('area')}, {inc.get('city')}. "
         f"Severity {inc.get('severity')}/10. Status: {inc.get('status')}. "
@@ -148,6 +177,11 @@ def estimate_voice_urgency(transcript: str) -> dict:
     """
     if not transcript:
         return {"urgency": 0, "cues": []}
+
+    if not _configured():
+        lower = transcript.lower()
+        cues = [word for word in ("help", "fire", "trapped", "bleeding", "urgent") if word in lower]
+        return {"urgency": min(10, len(cues) * 2 + (2 if "!" in transcript else 0)), "cues": cues}
 
     import json
     response = _get_client().chat.completions.create(

@@ -15,8 +15,10 @@ import math
 import os
 from typing import List, Optional, Tuple
 
-import requests
-import networkx as nx
+try:
+    import requests
+except ImportError:
+    requests = None
 
 from services.cosmos import get_resources_by_type
 
@@ -53,6 +55,8 @@ def _osrm_route(
         f"{origin_lon},{origin_lat};{dest_lon},{dest_lat}"
         "?overview=full&geometries=geojson"
     )
+    if requests is None:
+        return None
     try:
         resp = requests.get(url, timeout=5)
         data = resp.json()
@@ -78,11 +82,9 @@ def _dijkstra_fallback(distance_km: float) -> dict:
     Build a minimal 3-node graph and compute shortest path as a placeholder.
     In production this would be replaced by a real road-network graph.
     """
-    G = nx.Graph()
-    G.add_edge("origin", "midpoint",    weight=distance_km * 0.6)
-    G.add_edge("midpoint", "resource",  weight=distance_km * 0.4)
-    path   = nx.dijkstra_path(G, "origin", "resource", weight="weight")
-    length = nx.dijkstra_path_length(G, "origin", "resource", weight="weight")
+    # The fallback graph has one unavoidable path, so its shortest distance is
+    # simply the sum of the two edges. Avoid importing NetworkX just for that.
+    length = distance_km
     return {
         "distance_km": round(length, 2),
         "duration_s":  int(length / 40 * 3600),   # assume 40 km/h average

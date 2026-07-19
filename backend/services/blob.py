@@ -10,7 +10,11 @@ import os
 import uuid
 from typing import Optional
 
-from azure.storage.blob import BlobServiceClient, ContentSettings
+try:
+    from azure.storage.blob import BlobServiceClient, ContentSettings
+except ImportError:
+    BlobServiceClient = None
+    ContentSettings = None
 
 _blob_service: BlobServiceClient | None = None
 CONTAINER = os.getenv("BLOB_CONTAINER_MEDIA", "civicai-media")
@@ -18,6 +22,8 @@ CONTAINER = os.getenv("BLOB_CONTAINER_MEDIA", "civicai-media")
 
 def _service() -> BlobServiceClient:
     global _blob_service
+    if BlobServiceClient is None:
+        raise RuntimeError("Azure Blob Storage SDK is not installed")
     if _blob_service is None:
         _blob_service = BlobServiceClient.from_connection_string(
             os.environ["BLOB_CONNECTION_STRING"]
@@ -35,7 +41,12 @@ def upload_media(
     Upload a media file to Blob Storage under  <incident_id>/<uuid>.<ext>
     Returns the public URL string.
     """
-    ext       = original_filename.rsplit(".", 1)[-1].lower()
+    if not os.getenv("BLOB_CONNECTION_STRING"):
+        # Reports must remain submit-able in local development.  The client
+        # receives a stable reference rather than a misleading public URL.
+        return f"local://media/{incident_id}/{uuid.uuid4().hex}"
+
+    ext = (original_filename or "upload").rsplit(".", 1)[-1].lower()
     blob_name = f"{incident_id}/{uuid.uuid4().hex}.{ext}"
 
     container_client = _service().get_container_client(CONTAINER)

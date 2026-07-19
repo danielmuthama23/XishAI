@@ -23,9 +23,12 @@ computer vision, GPT-4o reasoning, Hedera blockchain logging, and predictive ris
 ## Quick start
 
 ### Backend
+
+Use Python 3.11 for the backend dependencies.
+
 ```bash
 cd backend
-python -m venv venv
+python3.11 -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env              # fill in your keys

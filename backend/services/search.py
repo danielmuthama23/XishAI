@@ -11,9 +11,12 @@ from __future__ import annotations
 import os
 from typing import Any, List, Optional
 
-from azure.core.credentials import AzureKeyCredential
-from azure.search.documents import SearchClient
-from azure.search.documents.models import VectorizedQuery
+try:
+    from azure.core.credentials import AzureKeyCredential
+    from azure.search.documents import SearchClient
+except ImportError:
+    AzureKeyCredential = None
+    SearchClient = None
 
 ENDPOINT    = os.getenv("SEARCH_ENDPOINT", "")
 KEY         = os.getenv("SEARCH_KEY", "")
@@ -24,6 +27,8 @@ _search_client: SearchClient | None = None
 
 def _client() -> SearchClient:
     global _search_client
+    if SearchClient is None or not ENDPOINT or not KEY or "YOUR_" in ENDPOINT or "your_" in KEY:
+        raise RuntimeError("Azure AI Search is not configured")
     if _search_client is None:
         _search_client = SearchClient(
             endpoint=ENDPOINT,
@@ -43,6 +48,8 @@ def index_incident(incident: dict) -> None:
     Push a Cosmos DB incident document into the Azure AI Search index.
     Call this immediately after create_incident() in cosmos.py.
     """
+    if not (SearchClient and ENDPOINT and KEY and "YOUR_" not in ENDPOINT and "your_" not in KEY):
+        return
     doc = {
         "id":          incident["id"],
         "type":        incident.get("type", ""),
@@ -66,6 +73,12 @@ def search_incidents(
     Full-text search over indexed incidents.
     Returns a list of result dicts.
     """
+    if not (SearchClient and ENDPOINT and KEY and "YOUR_" not in ENDPOINT and "your_" not in KEY):
+        from services.cosmos import list_incidents
+        terms = [term.lower() for term in query.split() if term]
+        return [incident for incident in list_incidents(city=city_filter, severity_min=severity_min or 1, limit=top)
+                if not terms or any(term in " ".join(str(incident.get(field, "")) for field in ("type", "description", "area", "city")).lower() for term in terms)]
+
     filter_parts: List[str] = []
     if city_filter:
         filter_parts.append(f"city eq '{city_filter}'")
